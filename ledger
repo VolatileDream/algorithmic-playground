@@ -1,0 +1,189 @@
+#!/usr/bin/env python3
+
+import argparse
+import hashlib
+import hmac
+import os
+import sys
+
+class Ledger(object):
+  def __init__(self, io_loader, hashfn):
+    self.io_loader = io_loader
+    self.io = None
+    self.hashfn = hashfn
+
+  def create(self):
+    first = LedgerEntry(b'\x00' * LedgerEntry.HASH_BYTES, os.urandom(64))
+    # Open io in exclusive mode.
+    self.__io(create=True).write(first.serialize())
+
+  def append(self, new_content, hmac_secret=None):
+    io = self.__io()
+    last_entry = LedgerEntry.last_from_stream(io)
+    entry = LedgerEntry(self.__hash_entry(last_entry, hmac_secret), new_content)
+    io.write(entry.serialize())
+
+  def validate(self, hmac_secret=None):
+    """The io loader passed is assumed to be at the start of the io source if not seekable"""
+    io = self.__io()
+    #if io.seekable():
+    #  io.seek(0, 0) # start of file
+    errors = [] # contains pairs of entries that have errors
+    last_entry = None
+    last_hash = b'\x00' * LedgerEntry.HASH_BYTES
+    for entry in self.__iter__():
+      if not hmac.compare_digest(last_hash, entry.prev_hash):
+        errors.append((last_entry, entry))
+
+      # move the last entries
+      last_entry = entry
+      last_hash = self.__hash_entry(entry, hmac_secret)
+
+    return errors
+
+  def __io(self, create=False):
+    if create and self.io:
+      raise AssertionError("IO Source already initialized!")
+    if not self.io:
+      options = "a+b"
+      if create:
+        options = "x+b"
+      self.io = self.io_loader(options)
+    return self.io
+
+  def __hash_entry(self, entry, hmac_secret):
+    buf = entry.serialize()
+    if self.hashfn == "sha":
+      return hashlib.sha512(buf).digest()
+    elif self.hashfn == "hmac":
+      if not hmac_secret:
+        raise ValueError("No hmac secret provided!")
+      return hmac.new(hmac_secret, buf, 'sha512').digest()
+    else:
+      raise ValueError("No such hash type: %s" % self.hashfn)
+
+  def __iter__(self):
+    return LedgerIterator(self.__io())
+
+
+class LedgerIterator(object):
+  def __init__(self, iostream):
+    self.stream = iostream
+
+  def __iter__(self):
+    return self
+
+  def __next__(self):
+    entry = LedgerEntry.from_stream(self.stream)
+    if entry is None:
+      raise StopIteration()
+    return entry
+
+
+class LedgerEntry(object):
+  # Number of bytes used to store the length
+  LENGTH_BYTES = 4
+  HASH_BYTES = 64 # 512 bits
+
+  def __init__(self, prev_hash, content):
+    if len(prev_hash) != LedgerEntry.HASH_BYTES:
+      raise ValueError("Hash length is incorrect: %s is not %s" % (len(prev_hash), LedgerEntry.HASH_BYTES))
+    self.length = len(content) + LedgerEntry.LENGTH_BYTES * 2 + LedgerEntry.HASH_BYTES
+    self.prev_hash = prev_hash
+    self.content = content
+
+  def serialize(self):
+    size_bytes = self.length.to_bytes(LedgerEntry.LENGTH_BYTES, byteorder='big')
+    return size_bytes \
+      + self.prev_hash \
+      + self.content \
+      + size_bytes
+
+  @staticmethod
+  def from_stream(stream):
+    """Reads the next ledger entry from the stream. If EOF, returns none."""
+    reader = IOReader(stream)
+
+    length = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder='big')
+    prev_hash = reader.read(LedgerEntry.HASH_BYTES)
+    content = reader.read(length - LedgerEntry.LENGTH_BYTES * 2 - LedgerEntry.HASH_BYTES)
+    back_ref = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder='big')
+
+    if reader.done():
+      # At some point reading hit the EOF
+      if length == 0:
+        return None
+      raise ValueError(
+          "reading from stream results in incorrectly read entry: (%s, %s, %s, %s)"
+          % (length, prev_hash, content, back_ref))
+    if length != back_ref:
+      raise Exception("Ledger entry length doesn't match backreference size, is the read offset correct?")
+    return LedgerEntry(prev_hash, content)
+
+  @staticmethod
+  def last_from_stream(stream):
+    """Assumes the stream is not already in position"""
+    stream.seek(-4, 2)
+    buf = stream.read(4)
+    length = int.from_bytes(buf, byteorder='big')
+    stream.seek(-length, 2)
+    return LedgerEntry.from_stream(stream)
+
+class IOReader(object):
+  def __init__(self, io):
+    self.io = io
+    self.eof = False
+
+  def read(self, count):
+    if self.eof:
+      return b''
+    buf = self.io.read(count)
+    if len(buf) != count:
+      self.eof = True
+    return buf
+
+  def done(self):
+    return self.eof
+
+
+def loader(name):
+  if name == "-":
+    return lambda opts: sys.stdin.detach()
+  else:
+    return lambda opts: open(name, opts)
+
+def validate(ledger, parsed_args):
+  errors = ledger.validate(parsed_args.secret)
+  for first, second in errors:
+    sys.stderr.write("Adjacent entries mismatch: (%s, %s)\n" %(first.prev_hash.hex(), second.prev_hash.hex()))
+  if len(errors) > 0:
+    return 1
+  return 0
+
+COMMANDS = {
+  "init": lambda ledger, args: ledger.create(),
+  "append": lambda ledger, args: ledger.append(args.content, args.secret),
+  "validate": validate,
+}
+
+def parser():
+  def utf8_bytes(val):
+    return bytes(val, "utf8")
+  p = argparse.ArgumentParser()
+  p.add_argument("--file", default=".ledger")
+  p.add_argument("--hash", default="sha")
+  p.add_argument("--content", type=utf8_bytes, default=None, help="Only used for append")
+  p.add_argument("--secret", type=utf8_bytes, default=None, help="Only used with --hash=hmac")
+  return p
+
+def main(command, *args):
+  parsed_args = parser().parse_args(args)
+
+  ledger = Ledger(loader(parsed_args.file), parsed_args.hash)
+
+  rc = COMMANDS[command](ledger, parsed_args)
+
+  sys.exit(rc)
+
+if __name__ == "__main__":
+  main(*sys.argv[1:])

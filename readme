@@ -1,0 +1,36 @@
+# Chains of blocks
+
+To validate log ordering.
+
+> ledger init ledger-file [--seed=random-init-value]
+> ledger append ledger-file
+> ledger validate (ledger-file|stdin)
+
+# File Format
+
+The primary goal of the file format is to avoid multiple or complicated file reads to keep appending simple.
+
+  +--------+-------------+-------------+--------+
+  | length |Previous Hash|   Content   |back ref|
+  +--------+-------------+-------------+--------+
+  ^                                          |
+  |                                          |
+  +------------------------------------------+
+
+  * `length` - YYY bytes, unsigned integer, contains the full entry size (YYY * 2 + XXX + content.length)
+  * `Previous Hash` - XXX bytes of hash data, computed over the previous entry.
+  * `Content` - arbitrary length content
+  * `Back ref` - same value as length
+
+Convenient properties of this format:
+
+  * `length` - allows for easy hashing while seeking forward
+    * read the value, move back by YYY bytes, hash `length` forward
+  * `back ref` - reading the last YYY bytes of the file gives you the location of the last entry
+    * This allows for easy hashing of the last entry for appending.
+
+Edge cases:
+
+  * The first entry is special:
+    * `previous hash` is going to be all 0
+    * it contains randomly generated content
