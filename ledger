@@ -19,12 +19,13 @@ class Ledger(object):
 
   def append(self, new_content, hmac_secret=None):
     io = self.__io()
+    # No need to seek here, because LedgerEntry.last_from_stream will seek to the end.
     last_entry = LedgerEntry.last_from_stream(io)
     entry = LedgerEntry(self.__hash_entry(last_entry, hmac_secret), new_content)
     io.write(entry.serialize())
 
   def validate(self, hmac_secret=None):
-    """The io loader passed is assumed to be at the start of the io source if not seekable"""
+    # The io loader passed is assumed to be at the start of the io source if not seekable
     io = self.__io()
     if io.seekable():
       io.seek(0, 0) # start of file
@@ -123,7 +124,7 @@ class LedgerEntry(object):
   @staticmethod
   def last_from_stream(stream):
     """Assumes the stream is not already in position"""
-    stream.seek(-4, 2)
+    stream.seek(-4, 2) # seek to the last 4 bytes of the stream
     buf = stream.read(4)
     length = int.from_bytes(buf, byteorder='big')
     stream.seek(-length, 2)
@@ -152,6 +153,14 @@ def loader(name):
   else:
     return lambda opts: open(name, opts)
 
+def append(ledger, args):
+  content = args.content
+  if content is None:
+    if args.file == '-':
+      raise ValueError("Standard input can not be used both for ledger & content input")
+    content = utf8_bytes(sys.stdin.read())
+  ledger.append(content, args.secret)
+
 def validate(ledger, parsed_args):
   errors = ledger.validate(parsed_args.secret)
   for first, second in errors:
@@ -162,13 +171,14 @@ def validate(ledger, parsed_args):
 
 COMMANDS = {
   "init": lambda ledger, args: ledger.create(),
-  "append": lambda ledger, args: ledger.append(args.content, args.secret),
+  "append": append,
   "validate": validate,
 }
 
+def utf8_bytes(val):
+  return bytes(val, "utf8")
+
 def parser():
-  def utf8_bytes(val):
-    return bytes(val, "utf8")
   p = argparse.ArgumentParser()
   p.add_argument("--file", default=".ledger")
   p.add_argument("--hash", default="sha")
