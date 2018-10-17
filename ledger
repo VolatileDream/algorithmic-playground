@@ -26,8 +26,8 @@ class Ledger(object):
   def validate(self, hmac_secret=None):
     """The io loader passed is assumed to be at the start of the io source if not seekable"""
     io = self.__io()
-    #if io.seekable():
-    #  io.seek(0, 0) # start of file
+    if io.seekable():
+      io.seek(0, 0) # start of file
     errors = [] # contains pairs of entries that have errors
     last_entry = None
     last_hash = b'\x00' * LedgerEntry.HASH_BYTES
