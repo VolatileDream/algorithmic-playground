@@ -7,13 +7,14 @@ import os
 import sys
 
 class Ledger(object):
+  __slots__ = ["io_loader", "io", "hashfn"]
   def __init__(self, io_loader, hashfn):
     self.io_loader = io_loader
     self.io = None
     self.hashfn = hashfn
 
   def create(self):
-    first = LedgerEntry(b'\x00' * LedgerEntry.HASH_BYTES, os.urandom(64))
+    first = LedgerEntry(b"\x00" * LedgerEntry.HASH_BYTES, os.urandom(64))
     # Open io in exclusive mode.
     self.__io(create=True).write(first.serialize())
 
@@ -31,8 +32,8 @@ class Ledger(object):
       io.seek(0, 0) # start of file
     errors = [] # contains pairs of entries that have errors
     last_entry = None
-    last_hash = b'\x00' * LedgerEntry.HASH_BYTES
-    for entry in self.__iter__():
+    last_hash = b"\x00" * LedgerEntry.HASH_BYTES
+    for entry in LedgerIterator(io):
       if not hmac.compare_digest(last_hash, entry.prev_hash):
         errors.append((last_entry, entry))
 
@@ -59,15 +60,13 @@ class Ledger(object):
     elif self.hashfn == "hmac":
       if not hmac_secret:
         raise ValueError("No hmac secret provided!")
-      return hmac.new(hmac_secret, buf, 'sha512').digest()
+      return hmac.new(hmac_secret, buf, "sha512").digest()
     else:
       raise ValueError("No such hash type: %s" % self.hashfn)
 
-  def __iter__(self):
-    return LedgerIterator(self.__io())
-
 
 class LedgerIterator(object):
+  __slots__ = ["stream"]
   def __init__(self, iostream):
     self.stream = iostream
 
@@ -82,6 +81,7 @@ class LedgerIterator(object):
 
 
 class LedgerEntry(object):
+  __slots__ = ["length", "prev_hash", "content"]
   # Number of bytes used to store the length
   LENGTH_BYTES = 4
   HASH_BYTES = 64 # 512 bits
@@ -94,7 +94,7 @@ class LedgerEntry(object):
     self.content = content
 
   def serialize(self):
-    size_bytes = self.length.to_bytes(LedgerEntry.LENGTH_BYTES, byteorder='big')
+    size_bytes = self.length.to_bytes(LedgerEntry.LENGTH_BYTES, byteorder="big")
     return size_bytes \
       + self.prev_hash \
       + self.content \
@@ -105,10 +105,10 @@ class LedgerEntry(object):
     """Reads the next ledger entry from the stream. If EOF, returns none."""
     reader = IOReader(stream)
 
-    length = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder='big')
+    length = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder="big")
     prev_hash = reader.read(LedgerEntry.HASH_BYTES)
     content = reader.read(length - LedgerEntry.LENGTH_BYTES * 2 - LedgerEntry.HASH_BYTES)
-    back_ref = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder='big')
+    back_ref = int.from_bytes(reader.read(LedgerEntry.LENGTH_BYTES), byteorder="big")
 
     if reader.done():
       # At some point reading hit the EOF
@@ -118,7 +118,7 @@ class LedgerEntry(object):
           "reading from stream results in incorrectly read entry: (%s, %s, %s, %s)"
           % (length, prev_hash, content, back_ref))
     if length != back_ref:
-      raise Exception("Ledger entry length doesn't match backreference size, is the read offset correct?")
+      raise Exception("Ledger entry length does not match backreference size, is the read offset correct?")
     return LedgerEntry(prev_hash, content)
 
   @staticmethod
@@ -126,18 +126,19 @@ class LedgerEntry(object):
     """Assumes the stream is not already in position"""
     stream.seek(-4, 2) # seek to the last 4 bytes of the stream
     buf = stream.read(4)
-    length = int.from_bytes(buf, byteorder='big')
+    length = int.from_bytes(buf, byteorder="big")
     stream.seek(-length, 2)
     return LedgerEntry.from_stream(stream)
 
 class IOReader(object):
+  __slots__ = ["io", "eof"]
   def __init__(self, io):
     self.io = io
     self.eof = False
 
   def read(self, count):
     if self.eof:
-      return b''
+      return b""
     buf = self.io.read(count)
     if len(buf) != count:
       self.eof = True
@@ -156,7 +157,7 @@ def loader(name):
 def append(ledger, args):
   content = args.content
   if content is None:
-    if args.file == '-':
+    if args.file == "-":
       raise ValueError("Standard input can not be used both for ledger & content input")
     content = utf8_bytes(sys.stdin.read())
   ledger.append(content, args.secret)
