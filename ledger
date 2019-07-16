@@ -130,6 +130,7 @@ class LedgerEntry(object):
     stream.seek(-length, 2)
     return LedgerEntry.from_stream(stream)
 
+
 class IOReader(object):
   __slots__ = ["io", "eof"]
   def __init__(self, io):
@@ -149,12 +150,14 @@ class IOReader(object):
 
 
 def loader(name):
+  """Helper function to pick input source."""
   if name == "-":
     return lambda opts: sys.stdin.detach()
   else:
     return lambda opts: open(name, opts)
 
 def append(ledger, args):
+  """'append' command"""
   content = args.content
   if content is None:
     if args.file == "-":
@@ -163,38 +166,39 @@ def append(ledger, args):
   ledger.append(content, args.secret)
 
 def validate(ledger, parsed_args):
+  """'validate' command"""
   errors = ledger.validate(parsed_args.secret)
   for first, second in errors:
-    sys.stderr.write("Adjacent entries mismatch: (%s, %s)\n" %(first.prev_hash.hex(), second.prev_hash.hex()))
+    sys.stdout.write("mismatch: (%s, %s)\n" %(first.prev_hash.hex(), second.prev_hash.hex()))
   if len(errors) > 0:
     return 1
   return 0
 
-COMMANDS = {
-  "init": lambda ledger, args: ledger.create(),
-  "append": append,
-  "validate": validate,
-}
-
 def utf8_bytes(val):
   return bytes(val, "utf8")
 
-def parser():
+def parser(commands):
   p = argparse.ArgumentParser()
-  p.add_argument("--file", default=".ledger")
-  p.add_argument("--hash", default="sha")
-  p.add_argument("--content", type=utf8_bytes, default=None, help="Only used for append")
-  p.add_argument("--secret", type=utf8_bytes, default=None, help="Only used with --hash=hmac")
+  p.add_argument("command", default=None, type=str, choices=commands)
+  p.add_argument("--file", "-f", default=".ledger")
+  p.add_argument("--hash", default="sha", help="Hash to use, one of: sha, hmac.")
+  p.add_argument("--content", "-c", type=utf8_bytes, default=None, help="Only used for append")
+  p.add_argument("--secret", "-s", type=utf8_bytes, default=None, help="Only used with --hash=hmac")
   return p
 
-def main(command, *args):
-  parsed_args = parser().parse_args(args)
+def main(args):
+  cmds = {
+    "init": lambda ledger, args: ledger.create(),
+    "append": append,
+    "validate": validate,
+  }
+  parsed_args = parser(cmds.keys()).parse_args(args)
 
   ledger = Ledger(loader(parsed_args.file), parsed_args.hash)
 
-  rc = COMMANDS[command](ledger, parsed_args)
+  rc = cmds[parsed_args.command](ledger, parsed_args)
 
   sys.exit(rc)
 
 if __name__ == "__main__":
-  main(*sys.argv[1:])
+  main(sys.argv[1:])
