@@ -47,7 +47,7 @@ class Ledger(object):
     if create and self.io:
       raise AssertionError("IO Source already initialized!")
     if not self.io:
-      options = "a+b"
+      options = "r+b"
       if create:
         options = "x+b"
       self.io = self.io_loader(options)
