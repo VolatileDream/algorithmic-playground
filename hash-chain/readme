@@ -1,10 +1,10 @@
-# Chains of blocks
+# Hash Chain
 
 To validate log ordering.
 
-> ledger init ledger-file [--seed=random-init-value]
-> ledger append ledger-file
-> ledger validate (ledger-file|stdin)
+> ledger init -f ledger-file
+> ledger append -f ledger-file
+> ledger validate -f (ledger-file|stdin)
 
 # File Format
 
