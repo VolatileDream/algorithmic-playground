@@ -1,0 +1,13 @@
+# Vector (Clock) Log
+
+To provide a synchronizable log.
+
+> vlog init -f file
+> # Appends new content for the participant
+> vlog append -f file -i in.file -p participant
+> echo "content" | vlog append -f file -p participant
+> # syncs the contents of in.file to file, only file is modified.
+> vlog sync -f file -i in.file
+> # lists out the content of the log file
+> vlog list -f file [--pretty]
+

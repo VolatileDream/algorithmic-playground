@@ -1,0 +1,30 @@
+
+# File Format
+
+The file format is dead simple, and doesn't support any fancy operations quickly.
+
+The file is a JSON array, without the final closing bracket (']').
+
+All operations must perform a full file read ( :c ) to know the state of the log.
+
+The primary goal of this format is simplicity: to easily create a vector-clock log.
+
+```
+{
+    # Value of the clock
+    "clock": {
+        "participant-1": 1
+        "participant-2": 2
+        ...
+        "participant-N": 42
+    },
+    # Last incremented value
+    "writer": "participant-4",
+    # Content logged
+    "entry": "log content goes here",
+}
+```
+
+## Edge Cases
+
+The first entry has an empty `clock`, `writer` value of `null`, and empty `entry` value.
