@@ -14,8 +14,10 @@ class Ledger(object):
     self.io = None
     self.hashfn = hashfn
 
-  def create(self):
-    first = LedgerEntry(b"\x00" * Ledger.INIT_HASH_BYTES, os.urandom(64))
+  def create(self, content=None):
+    if content is None:
+      content = os.urandom(64)
+    first = LedgerEntry(b"\x00" * Ledger.INIT_HASH_BYTES, content)
     # Open io in exclusive mode.
     self.__io(create=True).write(first.serialize())
 
