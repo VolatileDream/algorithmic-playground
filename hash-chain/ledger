@@ -21,14 +21,14 @@ class Ledger(object):
     # Open io in exclusive mode.
     self.__io(create=True).write(first.serialize())
 
-  def append(self, new_content, hmac_secret=None):
+  def append(self, new_content):
     io = self.__io()
     # No need to seek here, because LedgerEntry.last_from_stream will seek to the end.
     last_entry = LedgerEntry.last_from_stream(io)
-    entry = LedgerEntry(self.__hash_entry(last_entry, hmac_secret), new_content)
+    entry = LedgerEntry(self.__hash_entry(last_entry), new_content)
     io.write(entry.serialize())
 
-  def validate(self, hmac_secret=None):
+  def validate(self):
     # The io loader passed is assumed to be at the start of the io source if not seekable
     io = self.__io()
     if io.seekable():
@@ -42,7 +42,7 @@ class Ledger(object):
 
       # move the last entries
       last_entry = entry
-      last_hash = self.__hash_entry(entry, hmac_secret)
+      last_hash = self.__hash_entry(entry)
 
     return errors
 
@@ -56,16 +56,15 @@ class Ledger(object):
       self.io = self.io_loader(options)
     return self.io
 
-  def __hash_entry(self, entry, hmac_secret):
+  def __hash_entry(self, entry):
+    # This is really not the way to do this, especially when reading
+    # the contents of the last log off of disk. Ideally this would
+    # stream the contents off of disk, avoiding potentially reading
+    # the entire entry into memory.
     buf = entry.serialize()
-    if self.hashfn == "sha":
-      return hashlib.sha512(buf).digest()
-    elif self.hashfn == "hmac":
-      if not hmac_secret:
-        raise ValueError("No hmac secret provided!")
-      return hmac.new(hmac_secret, buf, "sha512").digest()
-    else:
-      raise ValueError("No such hash type: %s" % self.hashfn)
+    hash_state = self.hashfn()
+    hash_state.update(buf)
+    return hash_state.digest()
 
 
 class LedgerIterator(object):
@@ -169,11 +168,11 @@ def append(ledger, args):
     if args.file == "-":
       raise ValueError("Standard input can not be used both for ledger & content input")
     content = utf8_bytes(sys.stdin.read())
-  ledger.append(content, args.secret)
+  ledger.append(content)
 
 def validate(ledger, parsed_args):
   """'validate' command"""
-  errors = ledger.validate(parsed_args.secret)
+  errors = ledger.validate()
   for first, second in errors:
     sys.stdout.write("mismatch: (%s, %s)\n" %(first.prev_hash.hex(), second.prev_hash.hex()))
   if len(errors) > 0:
@@ -192,15 +191,28 @@ def parser(commands):
   p.add_argument("--secret", "-s", type=utf8_bytes, default=None, help="Only used with --hash=hmac")
   return p
 
+def hash_sha(args):
+  return lambda: hashlib.sha512()
+
+def hash_hmac(args):
+  if not args.secret:
+    raise ValueError("No hmac secret provided!")
+  return lambda: hmac.new(args.secret, digestmod="sha512")
+
 def main(args):
   cmds = {
     "init": lambda ledger, args: ledger.create(),
     "append": append,
     "validate": validate,
   }
+  hashes = {
+    "sha": hash_sha,
+    "hmac": hash_hmac,
+  }
   parsed_args = parser(cmds.keys()).parse_args(args)
 
-  ledger = Ledger(loader(parsed_args.file), parsed_args.hash)
+  hashfn = hashes[parsed_args.hash](parsed_args)
+  ledger = Ledger(loader(parsed_args.file), hashfn)
 
   rc = cmds[parsed_args.command](ledger, parsed_args)
 
