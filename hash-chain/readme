@@ -8,17 +8,18 @@ To validate log ordering.
 
 # File Format
 
-The primary goal of the file format is to avoid multiple or complicated file reads to keep appending simple.
+The primary goal of the file format is to avoid multiple file reads to keep appending quick.
 
-  +--------+-------------+-------------+--------+
-  | length |Previous Hash|   Content   |back ref|
-  +--------+-------------+-------------+--------+
-  ^                                          |
-  |                                          |
-  +------------------------------------------+
+  +--------+-------------+-------------+-------------+--------+
+  | length | hash length |Previous Hash|   Content   |back ref|
+  +--------+-------------+-------------+-------------+--------+
+  ^                                                       |
+  |                                                       |
+  +-------------------------------------------------------+
 
   * `length` - YYY bytes, unsigned integer, contains the full entry size (YYY * 2 + XXX + content.length)
-  * `Previous Hash` - XXX bytes of hash data, computed over the previous entry.
+  * `hash length` - YYY bytes, unsigned integer, denotes length of hash field
+  * `Previous Hash` - bytes of hash data, computed over the previous entry.
   * `Content` - arbitrary length content
   * `Back ref` - same value as length
 
